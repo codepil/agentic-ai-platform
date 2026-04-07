@@ -1,0 +1,24 @@
+# Python
+agent-engine/.venv/
+agent-engine/__pycache__/
+agent-engine/src/**/__pycache__/
+agent-engine/tests/__pycache__/
+agent-engine/.pytest_cache/
+agent-engine/*.egg-info/
+agent-engine/.env
+*.pyc
+*.pyo
+*.pyd
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp

@@ -31,7 +31,7 @@ Start here. Every deep-dive session produces a file in the relevant folder below
 | File | Status | Description |
 |------|--------|-------------|
 | [project-structure.md](03-platform-core/project-structure.md) | Pending | Spring Boot module layout |
-| [grpc-bridge.md](03-platform-core/grpc-bridge.md) | Pending | Java ↔ Python gRPC integration |
+| [rest-bridge.md](03-platform-core/rest-bridge.md) | Pending | Java ↔ Python REST bridge (FastAPI + Spring WebClient + SSE) |
 | [sap-integration.md](03-platform-core/sap-integration.md) | Pending | SAP adapter patterns |
 
 ### 04 — Frontend (ReactJS MFEs)

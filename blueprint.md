@@ -25,7 +25,7 @@ The self-care products integrate with SAP and enterprise middleware systems. The
 | Agent Framework | CrewAI 0.80.x (multi-agent crews per SDLC stage) |
 | LLM — Primary | Claude Sonnet 4.5 (complex reasoning, code generation) |
 | LLM — Fast/Cheap | Claude Haiku (simple transforms, formatting, summaries) |
-| Java ↔ Python Bridge | gRPC (grpc-java server / grpcio Python server) |
+| Java ↔ Python Bridge | REST (FastAPI on Python, Spring WebClient on Java) + SSE for event streaming |
 | Agent Memory | MongoDB Atlas Vector Search |
 | Auth | Okta + OAuth2 (PKCE for MFEs, client credentials for services) |
 | Agent Sandboxing | Docker-in-Docker (isolated per agent code execution task) |
@@ -220,7 +220,7 @@ Build:            Vite (dev), Webpack Module Federation (prod)
 Framework:        Spring Boot 3.x + Spring Security
 API:              REST (OpenAPI 3.0) + WebSocket (STOMP)
 Auth:             Spring Security OAuth2 Resource Server (Okta)
-gRPC:             grpc-java (calls to Python agent engine)
+HTTP Client:      Spring WebClient (calls Python agent engine REST API)
 Messaging:        Apache Kafka (agent task events)
 MongoDB:          Spring Data MongoDB + MongoDB Atlas
 SAP:              SAP JCo (RFC) + Apache Olingo (OData)
@@ -232,12 +232,13 @@ Build:            Maven + Docker + GitHub Actions
 ```
 Orchestration:    LangGraph 0.2.x (stateful SDLC workflow)
 Agents:           CrewAI 0.80.x (multi-agent crews)
+REST Server:      FastAPI + Uvicorn (HTTP/1.1, consumed by Java backend)
+Event Streaming:  Server-Sent Events (SSE) via FastAPI — Java subscribes, forwards to WebSocket
 LLM Primary:      Anthropic SDK — Claude Sonnet 4.5
 LLM Fast:         Anthropic SDK — Claude Haiku (simple/cheap tasks)
 Memory:           MongoDB Atlas Vector Search (via PyMongo)
 Tools:            GitHub API, Jira API, Figma API, custom SAP tools
 Sandboxing:       Docker-in-Docker (per agent code execution)
-gRPC Server:      grpcio (Python server, Java client)
 Testing:          pytest + pytest-asyncio
 Runtime:          Python 3.12 + Poetry
 ```
@@ -260,30 +261,46 @@ Search:           Atlas Search (full-text across all artifacts)
 
 ---
 
-## Java ↔ Python gRPC Bridge
+## Java ↔ Python REST Bridge
 
-```protobuf
-// agent_service.proto
-service AgentService {
-  rpc RunCrew (CrewRequest) returns (stream CrewEvent);
-  rpc GetRunStatus (RunStatusRequest) returns (RunStatus);
-  rpc CancelRun (CancelRequest) returns (CancelResponse);
+All communication between Java (Spring Boot) and Python (FastAPI) is HTTP/1.1 REST.
+Streaming agent events use Server-Sent Events (SSE) — Java subscribes and forwards to ReactJS via WebSocket.
+
+```
+Python FastAPI endpoints                  Java Spring WebClient calls
+─────────────────────────────────────────────────────────────────────
+POST   /api/v1/runs                   ←── start a new SDLC run
+POST   /api/v1/runs/{id}/resume       ←── resume after human approval
+GET    /api/v1/runs/{id}/status       ←── poll run status
+GET    /api/v1/runs/{id}/events       ←── SSE stream of agent events
+DELETE /api/v1/runs/{id}              ←── cancel a running run
+```
+
+**Request/Response contract (JSON):**
+
+```json
+// POST /api/v1/runs — request
+{
+  "run_id":       "uuid-v4",
+  "thread_id":    "uuid-v4",
+  "jira_epic_id": "SC-42",
+  "figma_url":    "https://figma.com/file/...",
+  "prd_s3_url":   null,
+  "product_id":   "SelfCare-001",
+  "max_qa_iterations": 3
 }
 
-message CrewRequest {
-  string crew_type = 1;        // "requirements", "dev", "qa", etc.
-  string run_id = 2;
-  string input_payload = 3;    // JSON: jira_epic, figma_url, repo, etc.
-  map<string, string> context = 4;
+// POST /api/v1/runs/{id}/resume — request
+{
+  "decision":    "approved",
+  "feedback":    null,
+  "approved_by": "okta-user-id"
 }
 
-message CrewEvent {
-  string run_id = 1;
-  string agent_name = 2;
-  string event_type = 3;       // "thinking", "tool_call", "output", "error"
-  string payload = 4;
-  int64 timestamp = 5;
-}
+// GET /api/v1/runs/{id}/events — SSE stream
+data: {"run_id":"...","agent":"RequirementsParser","event_type":"thinking","payload":"...","ts":1712345678}
+data: {"run_id":"...","agent":"RequirementsParser","event_type":"tool_call","payload":"...","ts":1712345679}
+data: {"run_id":"...","agent":"","event_type":"stage_complete","payload":"requirements","ts":1712345700}
 ```
 
 ---
@@ -369,7 +386,7 @@ JWT Scopes:
 - ADR-001: Document all architecture decisions
 
 ### Phase 1 — Core Platform (Months 4–9)
-- LangGraph workflow engine (Python) + gRPC bridge to Java
+- LangGraph workflow engine (Python) + FastAPI REST bridge to Java
 - Requirements Crew + Architecture Crew operational
 - MongoDB Atlas agent state/memory schema live
 - Human approval gate — Slack notification + Web UI
@@ -419,7 +436,7 @@ JWT Scopes:
 ### Sprint 5–6: Platform Core Skeleton
 - [ ] Spring Boot app with Okta JWT validation
 - [ ] MongoDB Atlas connection + base collections
-- [ ] gRPC server/client stubs (Java ↔ Python)
+- [ ] FastAPI REST server skeleton in agent-engine (POST /runs, POST /runs/{id}/resume, GET /runs/{id}/events SSE)
 - [ ] Kafka cluster + first topic (agent.events)
 - [ ] GitHub Actions pipeline for platform-core
 
@@ -443,7 +460,7 @@ JWT Scopes:
 - [ ] mfe-audit-logs MFE live
 - [ ] LLM token cost tracking per run
 - [ ] Alert: agent stuck > 30 min → Slack escalation
-- [ ] Load test gRPC bridge
+- [ ] Load test FastAPI REST bridge (k6 against /events SSE endpoint)
 
 ---
 
@@ -453,7 +470,7 @@ JWT Scopes:
 | Role | Count | Focus |
 |------|-------|-------|
 | Platform Architect / Tech Lead | 1 | Overall architecture, decisions, cross-team alignment |
-| Java Engineers | 2 | Spring Boot, gRPC bridge, SAP adapters |
+| Java Engineers | 2 | Spring Boot, WebClient REST bridge, SAP adapters |
 | Python AI Engineers | 2 | LangGraph, CrewAI, prompt engineering |
 | ReactJS Engineers | 2 | MFE shell, dashboards, design system |
 | MongoDB / Data Engineer | 1 | Atlas schema, vector search, aggregations |
@@ -513,7 +530,7 @@ JWT Scopes:
 
 - [ ] LangGraph SDLC workflow — detailed node/edge definitions, state schema, checkpointing
 - [ ] CrewAI crew definitions — agent roles, prompts, tool bindings per crew
-- [ ] Java Spring Boot project structure — module layout, gRPC integration
+- [ ] Java Spring Boot project structure — module layout, WebClient REST bridge to agent engine
 - [ ] MongoDB Atlas schema — full collection design, indexes, vector search config
 - [ ] Figma → ReactJS pipeline — design token export, Style Dictionary config, MFE architecture
 - [ ] SAP integration patterns — OData vs BAPI decision matrix, event-driven sync design

@@ -577,7 +577,208 @@ class MongoCheckpointer(BaseCheckpointSaver):
 
 ## Java Backend — Resuming the Graph After Human Approval
 
-The Java backend is responsible for detecting paused graphs and resuming them after human action.
+All communication between Java (Spring Boot) and Python (FastAPI) is HTTP/1.1 REST.
+Agent event streaming uses Server-Sent Events (SSE) — Java subscribes to the Python SSE endpoint
+and forwards events to ReactJS clients via WebSocket (STOMP).
+
+### Python FastAPI — REST + SSE Server
+
+```python
+# agent-engine: src/platform/api/server.py
+
+import asyncio
+import json
+import time
+import uuid
+from typing import AsyncIterator
+
+from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+from ..graphs.sdlc_graph import build_sdlc_graph
+from ..state.sdlc_state import SDLCState, default_llm_usage
+from ..checkpointing.mongo_checkpointer import MongoCheckpointer
+from ..config import settings
+
+app = FastAPI(title="Agent Engine", version="1.0.0")
+
+# One shared graph instance — thread_id isolates each SDLC run
+checkpointer = MongoCheckpointer(settings.mongo_uri, settings.mongo_db_name)
+graph = build_sdlc_graph(checkpointer)
+
+# In-memory event queues per run_id (backed by MongoDB in production)
+_event_queues: dict[str, asyncio.Queue] = {}
+
+
+class StartRunRequest(BaseModel):
+    run_id: str
+    thread_id: str
+    jira_epic_id: str
+    product_id: str
+    figma_url: str | None = None
+    prd_s3_url: str | None = None
+    max_qa_iterations: int = 3
+
+
+class ResumeRunRequest(BaseModel):
+    decision: str       # "approved" | "rejected"
+    feedback: str | None = None
+    approved_by: str
+
+
+@app.post("/api/v1/runs", status_code=202)
+async def start_run(req: StartRunRequest, background_tasks: BackgroundTasks):
+    """Start a new SDLC run. Runs the graph asynchronously."""
+    initial_state = SDLCState(
+        run_id=req.run_id,
+        product_id=req.product_id,
+        thread_id=req.thread_id,
+        jira_epic_id=req.jira_epic_id,
+        figma_url=req.figma_url,
+        prd_s3_url=req.prd_s3_url,
+        requirements=None,
+        architecture=None,
+        code_artifacts=[],
+        qa_results=None,
+        deployment=None,
+        current_stage="intake",
+        qa_iteration=0,
+        max_qa_iterations=req.max_qa_iterations,
+        approval_status=None,
+        human_feedback=None,
+        requirements_rejection_count=0,
+        messages=[],
+        llm_usage=default_llm_usage(),
+        errors=[],
+        stage_timings={},
+    )
+    _event_queues[req.run_id] = asyncio.Queue()
+    config = {"configurable": {"thread_id": req.thread_id}}
+    background_tasks.add_task(_run_graph, req.run_id, initial_state, config)
+    return {"run_id": req.run_id, "status": "started"}
+
+
+@app.post("/api/v1/runs/{run_id}/resume", status_code=202)
+async def resume_run(run_id: str, req: ResumeRunRequest, background_tasks: BackgroundTasks):
+    """Resume a graph paused at a human approval gate."""
+    from langgraph.types import Command
+
+    # Retrieve thread_id from MongoDB checkpoint
+    snapshot = _get_snapshot(run_id)
+    if not snapshot:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+
+    thread_id = snapshot.config["configurable"]["thread_id"]
+    config = {"configurable": {"thread_id": thread_id}}
+    resume_payload = {"decision": req.decision, "feedback": req.feedback}
+
+    if run_id not in _event_queues:
+        _event_queues[run_id] = asyncio.Queue()
+
+    background_tasks.add_task(
+        _resume_graph, run_id, Command(resume=resume_payload), config
+    )
+    return {"run_id": run_id, "status": "resuming"}
+
+
+@app.get("/api/v1/runs/{run_id}/events")
+async def stream_events(run_id: str):
+    """SSE endpoint — streams agent events as the graph executes."""
+    if run_id not in _event_queues:
+        raise HTTPException(status_code=404, detail=f"No event stream for run {run_id}")
+
+    async def event_generator() -> AsyncIterator[str]:
+        queue = _event_queues[run_id]
+        while True:
+            event = await asyncio.wait_for(queue.get(), timeout=300)
+            if event is None:           # sentinel — run finished
+                yield "data: {\"event_type\": \"run_complete\"}\n\n"
+                break
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.get("/api/v1/runs/{run_id}/status")
+async def get_status(run_id: str):
+    """Poll the current status of a run from the checkpoint."""
+    snapshot = _get_snapshot(run_id)
+    if not snapshot:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    state = snapshot.values
+    return {
+        "run_id":        run_id,
+        "current_stage": state.get("current_stage"),
+        "next_nodes":    list(snapshot.next),
+        "qa_iteration":  state.get("qa_iteration", 0),
+        "llm_usage":     state.get("llm_usage"),
+        "errors":        state.get("errors", []),
+    }
+
+
+@app.delete("/api/v1/runs/{run_id}", status_code=204)
+async def cancel_run(run_id: str):
+    """Cancel a run by draining its event queue with a sentinel."""
+    queue = _event_queues.pop(run_id, None)
+    if queue:
+        await queue.put(None)
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+async def _run_graph(run_id: str, initial_state: SDLCState, config: dict):
+    queue = _event_queues[run_id]
+    try:
+        async for event in graph.astream(initial_state, config=config, stream_mode="updates"):
+            await queue.put(_to_sse_event(run_id, event))
+    except Exception as exc:
+        await queue.put({"run_id": run_id, "event_type": "error", "payload": str(exc), "ts": _ts()})
+    finally:
+        await queue.put(None)   # sentinel
+
+
+async def _resume_graph(run_id: str, command, config: dict):
+    queue = _event_queues[run_id]
+    try:
+        async for event in graph.astream(command, config=config, stream_mode="updates"):
+            await queue.put(_to_sse_event(run_id, event))
+    except Exception as exc:
+        await queue.put({"run_id": run_id, "event_type": "error", "payload": str(exc), "ts": _ts()})
+    finally:
+        await queue.put(None)
+
+
+def _to_sse_event(run_id: str, event: dict) -> dict:
+    node = next(iter(event), "")
+    state_update = event.get(node, {})
+    return {
+        "run_id":     run_id,
+        "agent":      node,
+        "event_type": "state_update",
+        "payload":    state_update.get("current_stage", ""),
+        "ts":         _ts(),
+    }
+
+
+def _ts() -> int:
+    return int(time.time() * 1000)
+
+
+def _get_snapshot(run_id: str):
+    # Scan checkpoints to find the thread_id for this run_id
+    # In production: look up run_id → thread_id in agent_runs MongoDB collection
+    # For now thread_id == run_id (see StartRunRequest)
+    config = {"configurable": {"thread_id": run_id}}
+    try:
+        return graph.get_state(config)
+    except Exception:
+        return None
+```
+
+### Java Spring Boot — Calling the Agent Engine
 
 ```java
 // platform-core: AgentRunService.java
@@ -585,13 +786,48 @@ The Java backend is responsible for detecting paused graphs and resuming them af
 @Service
 public class AgentRunService {
 
-    private final AgentEngineGrpcClient grpcClient;
+    private final WebClient agentEngineClient;   // Spring WebClient (non-blocking)
     private final AgentRunRepository runRepository;
+    private final WebSocketBroadcaster webSocketBroadcaster;
+    private final AuditTrailService auditTrailService;
     private final SlackNotificationService slack;
+
+    public AgentRunService(
+            @Value("${agent.engine.base-url}") String agentEngineUrl,
+            AgentRunRepository runRepository,
+            WebSocketBroadcaster webSocketBroadcaster,
+            AuditTrailService auditTrailService,
+            SlackNotificationService slack) {
+        this.agentEngineClient = WebClient.builder()
+            .baseUrl(agentEngineUrl)
+            .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+            .build();
+        this.runRepository = runRepository;
+        this.webSocketBroadcaster = webSocketBroadcaster;
+        this.auditTrailService = auditTrailService;
+        this.slack = slack;
+    }
+
+    /**
+     * Starts a new SDLC run by calling POST /api/v1/runs on the agent engine,
+     * then subscribes to the SSE event stream and forwards events to the
+     * ReactJS dashboard via WebSocket.
+     */
+    public void startRun(StartRunCommand cmd) {
+        String runId = cmd.getRunId();
+
+        // 1. Kick off the run
+        agentEngineClient.post()
+            .uri("/api/v1/runs")
+            .bodyValue(buildStartRunRequest(cmd))
+            .retrieve()
+            .bodyToMono(Map.class)
+            .subscribe(response -> subscribeToEventStream(runId));
+    }
 
     /**
      * Called by the approval portal MFE when a human approves or rejects.
-     * Sends a gRPC resume command to the Python agent engine.
+     * Sends a REST resume request to the Python agent engine.
      */
     public void processApproval(String runId, ApprovalDecision decision) {
         AgentRun run = runRepository.findByRunId(runId)
@@ -601,69 +837,42 @@ public class AgentRunService {
             throw new InvalidRunStateException("Run is not awaiting approval");
         }
 
-        // Build resume payload — maps to LangGraph Command(resume=...)
-        ResumeRunRequest request = ResumeRunRequest.newBuilder()
-            .setRunId(runId)
-            .setThreadId(run.getThreadId())
-            .setDecision(decision.getDecision())      // "approved" | "rejected"
-            .setFeedback(decision.getFeedback() != null ? decision.getFeedback() : "")
-            .setApprovedBy(decision.getApprovedBy())  // Okta user ID
-            .build();
+        Map<String, Object> body = Map.of(
+            "decision",    decision.getDecision(),       // "approved" | "rejected"
+            "feedback",    decision.getFeedback() != null ? decision.getFeedback() : "",
+            "approved_by", decision.getApprovedBy()      // Okta user ID
+        );
 
-        // Stream events back as graph resumes
-        grpcClient.resumeRun(request, new StreamObserver<CrewEvent>() {
-            @Override
-            public void onNext(CrewEvent event) {
-                // Broadcast to dashboard WebSocket subscribers
-                webSocketBroadcaster.broadcast(runId, event);
-                // Persist event to audit_trail collection
-                auditTrailService.record(runId, event);
-            }
+        agentEngineClient.post()
+            .uri("/api/v1/runs/{runId}/resume", runId)
+            .bodyValue(body)
+            .retrieve()
+            .bodyToMono(Map.class)
+            .subscribe(response -> subscribeToEventStream(runId));
+    }
 
-            @Override
-            public void onError(Throwable t) {
+    /**
+     * Subscribe to the SSE event stream from the Python agent engine.
+     * Each event is broadcast to WebSocket subscribers and persisted to audit_trail.
+     */
+    private void subscribeToEventStream(String runId) {
+        agentEngineClient.get()
+            .uri("/api/v1/runs/{runId}/events", runId)
+            .accept(MediaType.TEXT_EVENT_STREAM)
+            .retrieve()
+            .bodyToFlux(String.class)          // each SSE data line
+            .doOnNext(rawEvent -> {
+                webSocketBroadcaster.broadcast(runId, rawEvent);
+                auditTrailService.record(runId, rawEvent);
+            })
+            .doOnError(t -> {
                 runRepository.updateStatus(runId, "failed");
-                slack.alertOncall(runId, "Graph resume failed: " + t.getMessage());
-            }
-
-            @Override
-            public void onCompleted() {
-                runRepository.updateStatus(runId, "completed");
-            }
-        });
+                slack.alertOncall(runId, "Agent engine stream error: " + t.getMessage());
+            })
+            .doOnComplete(() -> runRepository.updateStatus(runId, "completed"))
+            .subscribe();
     }
 }
-```
-
-```python
-# agent-engine: grpc_server.py — resume handler
-
-async def ResumeRun(self, request, context):
-    """
-    Receives resume command from Java. Calls graph with Command(resume=...)
-    to wake the interrupted node (requirements_approval or staging_approval).
-    """
-    from langgraph.types import Command
-
-    resume_payload = {
-        "decision": request.decision,
-        "feedback": request.feedback,
-    }
-
-    config = {"configurable": {"thread_id": request.thread_id}}
-
-    async for event in graph.astream(
-        Command(resume=resume_payload),
-        config=config,
-        stream_mode="updates"
-    ):
-        yield CrewEvent(
-            run_id=request.run_id,
-            agent_name=event.get("node", ""),
-            event_type="state_update",
-            payload=json.dumps(event),
-            timestamp=int(time.time() * 1000)
-        )
 ```
 
 ---

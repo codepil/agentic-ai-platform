@@ -16,7 +16,10 @@ Start here. Every deep-dive session produces a file in the relevant folder below
 | [decisions/ADR-002](01-architecture/decisions/ADR-002-python-langgraph-crewai-for-agent-orchestration.md) | Done | Python + LangGraph + CrewAI for agent orchestration |
 | [decisions/ADR-003](01-architecture/decisions/ADR-003-fastapi-rest-sse-over-grpc.md) | Done | FastAPI REST + SSE over gRPC for Java-Python bridge |
 | [decisions/ADR-004](01-architecture/decisions/ADR-004-three-tier-architecture-with-context-enrichment.md) | Done | 3-tier architecture with platform-core context enrichment gateway |
-| [diagrams/](01-architecture/diagrams/) | — | System diagrams |
+| [diagrams/01-platform-overview.md](01-architecture/diagrams/01-platform-overview.md) | Done | Full 3-tier platform overview (presentation → application → data) |
+| [diagrams/02-sdlc-workflow.md](01-architecture/diagrams/02-sdlc-workflow.md) | Done | LangGraph SDLC state machine with interrupt gates, crews, checkpoints |
+| [diagrams/03-aws-infrastructure.md](01-architecture/diagrams/03-aws-infrastructure.md) | Done | VPC topology, ECS, ALB, Atlas PrivateLink — AWS infrastructure view |
+| [diagrams/04-data-flow.md](01-architecture/diagrams/04-data-flow.md) | Done | Sequence diagram: start run + approval resume flows |
 
 ### 02 — Agent Engine
 | File | Status | Description |

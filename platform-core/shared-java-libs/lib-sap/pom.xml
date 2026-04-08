@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.codepil.platform</groupId>
+        <artifactId>platform-core</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>lib-sap</artifactId>
+    <packaging>jar</packaging>
+    <name>lib-sap — SAP OData v4 and BAPI/RFC Client</name>
+    <description>
+        Shared library providing SapODataClient (generic OData v4 via Spring WebClient with
+        OAuth2 client credentials and exponential backoff retry) and SapBapiClient (JCo-based
+        RFC/BAPI caller). SAP JCo jar must be installed to the local/private Maven repository
+        manually — it is not available in Maven Central.
+    </description>
+
+    <dependencies>
+
+        <!-- Spring WebFlux / WebClient for OData HTTP calls -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux</artifactId>
+        </dependency>
+
+        <!-- Spring Security OAuth2 client for SAP Gateway token acquisition -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-oauth2-client</artifactId>
+        </dependency>
+
+        <!-- Configuration properties binding -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-configuration-processor</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- SLF4J API -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+
+        <!--
+            SAP JCo (Java Connector) — NOT available in Maven Central.
+            Must be downloaded from SAP Service Marketplace and installed to your
+            private Maven repository or local ~/.m2 with:
+
+            mvn install:install-file \
+              -Dfile=sapjco3.jar \
+              -DgroupId=com.sap.conn.jco \
+              -DartifactId=sapjco3 \
+              -Dversion=3.1.9 \
+              -Dpackaging=jar
+
+            Then uncomment the dependency below:
+        -->
+        <!--
+        <dependency>
+            <groupId>com.sap.conn.jco</groupId>
+            <artifactId>sapjco3</artifactId>
+            <version>3.1.9</version>
+        </dependency>
+        -->
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.projectreactor</groupId>
+            <artifactId>reactor-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+    </dependencies>
+
+</project>

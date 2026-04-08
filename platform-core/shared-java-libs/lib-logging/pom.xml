@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.codepil.platform</groupId>
+        <artifactId>platform-core</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>lib-logging</artifactId>
+    <packaging>jar</packaging>
+    <name>lib-logging — MDC Injection and Structured JSON Logging</name>
+    <description>
+        Shared library providing MdcFilter (injects runId/productId into MDC from HTTP headers)
+        and PlatformLogger (structured JSON log events for ELK/CloudWatch). Used by platform-core
+        and all generated product services.
+    </description>
+
+    <dependencies>
+
+        <!-- Spring Web for OncePerRequestFilter -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+
+        <!-- Jackson for JSON log formatting (spring-boot-starter-web brings SLF4J+Logback) -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+    </dependencies>
+
+</project>

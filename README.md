@@ -30,7 +30,7 @@ Start here. Every deep-dive session produces a file in the relevant folder below
 ### 03 — Platform Core (Java)
 | File | Status | Description |
 |------|--------|-------------|
-| [project-structure.md](03-platform-core/project-structure.md) | Pending | Spring Boot module layout |
+| [project-structure.md](03-platform-core/project-structure.md) | Done | Spring Boot module layout, coding standards, shared libs |
 | [rest-bridge.md](03-platform-core/rest-bridge.md) | Pending | Java ↔ Python REST bridge (FastAPI + Spring WebClient + SSE) |
 | [sap-integration.md](03-platform-core/sap-integration.md) | Pending | SAP adapter patterns |
 

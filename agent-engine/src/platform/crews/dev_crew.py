@@ -27,6 +27,69 @@ from ..state.sdlc_state import CodeArtifact
 class DevCrew(BaseCrew):
     """Implements the code artefacts for the current sprint."""
 
+    # -------------------------------------------------------------------------
+    # Platform-core coding standard snippets injected into Dev Crew agent prompts
+    # as few-shot examples.  The JavaServiceBuilder agent backstory includes these
+    # snippets so the LLM replicates the exact patterns used in platform-core
+    # rather than inventing its own style.
+    # -------------------------------------------------------------------------
+    _PLATFORM_CORE_SNIPPETS = """
+=== CODING STANDARD: Spring Boot Controller Pattern ===
+@RestController
+@RequestMapping("/api/v1/products")
+public class ProductController {
+    private final ProductService productService;
+
+    public ProductController(ProductService productService) {
+        this.productService = productService;
+    }
+
+    @GetMapping
+    @PreAuthorize("hasAuthority('SCOPE_products:read')")
+    public ResponseEntity<Page<ProductResponse>> listProducts(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(productService.listProducts(page, size));
+    }
+}
+
+=== CODING STANDARD: Spring Boot Service Pattern ===
+@Service
+public class ProductService {
+    private static final Logger log = LoggerFactory.getLogger(ProductService.class);
+    private final ProductRepository productRepository;
+
+    @Transactional(readOnly = true)
+    public Page<ProductResponse> listProducts(int page, int size) {
+        log.info("Listing products page={} size={}", page, size);
+        return productRepository.findAll(PageRequest.of(page, size))
+            .map(ProductResponse::from);
+    }
+}
+
+=== CODING STANDARD: MongoDB Repository Pattern ===
+@Repository
+public interface ProductRepository extends MongoRepository<Product, String> {
+    Page<Product> findByCategoryAndPriceLessThanEqual(
+        String category, BigDecimal maxPrice, Pageable pageable);
+
+    @Query("{ 'sapMaterialId': ?0 }")
+    Optional<Product> findBySapMaterialId(String sapMaterialId);
+}
+
+=== CODING STANDARD: DTO Record Pattern (Java 21) ===
+public record ProductResponse(
+    String id, String sku, String name,
+    BigDecimal price, String category, int stockQuantity
+) {
+    public static ProductResponse from(Product product) {
+        return new ProductResponse(product.getId(), product.getSku(),
+            product.getName(), product.getPrice(),
+            product.getCategory(), product.getStockQuantity());
+    }
+}
+"""
+
     _MOCK_ARTIFACTS: List[CodeArtifact] = [
         {
             "artifact_id": "artifact-001",
@@ -99,6 +162,8 @@ class DevCrew(BaseCrew):
                 "and SAP JCo integration. You write production-ready code with proper exception "
                 "handling, logging, and Testcontainers-based integration tests. Your code follows "
                 "hexagonal architecture and is fully covered by unit tests."
+                "\n\nCODING STANDARDS TO FOLLOW:\n"
+                + self._PLATFORM_CORE_SNIPPETS
             ),
             llm=llm,
             tools=[commit_file_to_github],

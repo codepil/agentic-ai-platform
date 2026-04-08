@@ -1,0 +1,53 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: platform-core
+
+  data:
+    mongodb:
+      uri: ${MONGO_URI:mongodb://localhost:27017/agent_platform}
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # Okta authorization server issuer URI — set OKTA_ISSUER_URI in production
+          # Format: https://{okta-domain}/oauth2/{auth-server-id}
+          # Example: https://dev-12345.okta.com/oauth2/default
+          issuer-uri: ${OKTA_ISSUER_URI:https://placeholder.okta.example.com/oauth2/default}
+
+  # Async task executor for @Async methods (AuditTrailService.record)
+  task:
+    execution:
+      pool:
+        core-size: 4
+        max-size: 16
+        queue-capacity: 500
+      thread-name-prefix: platform-async-
+
+agent:
+  engine:
+    base-url: ${AGENT_ENGINE_BASE_URL:http://localhost:8000}
+
+slack:
+  webhook-url: ${SLACK_WEBHOOK_URL:}
+  oncall-channel: ${SLACK_ONCALL_CHANNEL:#platform-oncall}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when_authorized
+
+logging:
+  pattern:
+    console: "%d{ISO8601} [%thread] %-5level [%X{runId}] [%X{productId}] %logger{36} - %msg%n"
+  level:
+    com.codepil.platform: INFO
+    org.springframework.security: WARN
+    org.springframework.data.mongodb: WARN

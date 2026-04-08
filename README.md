@@ -12,7 +12,10 @@ Start here. Every deep-dive session produces a file in the relevant folder below
 ### 01 — Architecture
 | File | Status | Description |
 |------|--------|-------------|
-| [decisions/](01-architecture/decisions/) | — | Architecture Decision Records (ADRs) |
+| [decisions/ADR-001](01-architecture/decisions/ADR-001-java-platform-core-over-python.md) | Done | Java Spring Boot for platform control plane over Python |
+| [decisions/ADR-002](01-architecture/decisions/ADR-002-python-langgraph-crewai-for-agent-orchestration.md) | Done | Python + LangGraph + CrewAI for agent orchestration |
+| [decisions/ADR-003](01-architecture/decisions/ADR-003-fastapi-rest-sse-over-grpc.md) | Done | FastAPI REST + SSE over gRPC for Java-Python bridge |
+| [decisions/ADR-004](01-architecture/decisions/ADR-004-three-tier-architecture-with-context-enrichment.md) | Done | 3-tier architecture with platform-core context enrichment gateway |
 | [diagrams/](01-architecture/diagrams/) | — | System diagrams |
 
 ### 02 — Agent Engine
@@ -31,7 +34,7 @@ Start here. Every deep-dive session produces a file in the relevant folder below
 | File | Status | Description |
 |------|--------|-------------|
 | [project-structure.md](03-platform-core/project-structure.md) | Done | Spring Boot module layout, coding standards, shared libs |
-| [rest-bridge.md](03-platform-core/rest-bridge.md) | Pending | Java ↔ Python REST bridge (FastAPI + Spring WebClient + SSE) |
+| [agent-engine/README.md](agent-engine/README.md) | Done | Java ↔ Python REST bridge — sequence diagram, SSE events, error handling (in agent-engine README) |
 | [sap-integration.md](03-platform-core/sap-integration.md) | Pending | SAP adapter patterns |
 
 ### 04 — Frontend (ReactJS MFEs)
@@ -43,8 +46,10 @@ Start here. Every deep-dive session produces a file in the relevant folder below
 ### 05 — Data (MongoDB Atlas)
 | File | Status | Description |
 |------|--------|-------------|
-| [schema-design.md](05-data/schema-design.md) | Pending | Full collection design, indexes |
-| [vector-search.md](05-data/vector-search.md) | Pending | Atlas Vector Search config for agent memory |
+| [schema-design.md](05-data/schema-design.md) | Done | Full collection design, indexes, retention, Atlas sizing |
+| [vector-search.md](05-data/vector-search.md) | Done | Atlas Vector Search config, query patterns, context enrichment integration |
+| [init-mongo.js](05-data/init-mongo.js) | Done | mongosh init script — collections, validators, indexes, TTLs, seed data |
+| [vector-search-index.json](05-data/vector-search-index.json) | Done | Atlas Vector Search index definition (Atlas CLI input) |
 
 ### 06 — Infrastructure
 | File | Status | Description |

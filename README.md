@@ -54,9 +54,17 @@ Start here. Every deep-dive session produces a file in the relevant folder below
 ### 06 — Infrastructure
 | File | Status | Description |
 |------|--------|-------------|
-| [aws-architecture.md](06-infrastructure/aws-architecture.md) | Pending | AWS account structure, EKS, networking |
-| [terraform-structure.md](06-infrastructure/terraform-structure.md) | Pending | Terraform module layout |
-| [cicd-pipeline.md](06-infrastructure/cicd-pipeline.md) | Pending | GitHub Actions workflow design |
+| [aws-architecture.md](06-infrastructure/aws-architecture.md) | Done | VPC topology, ECS Fargate, ALB, Atlas PrivateLink, IAM, cost estimate |
+| [terraform/README.md](06-infrastructure/terraform/README.md) | Done | Deploy guide: S3 backend, secrets bootstrap, ECR push, Atlas setup |
+| [terraform/modules/vpc/](06-infrastructure/terraform/modules/vpc/) | Done | VPC, subnets (public/private/isolated), NAT GWs, Flow Logs |
+| [terraform/modules/alb/](06-infrastructure/terraform/modules/alb/) | Done | Internet-facing ALB, HTTPS, WebSocket listener rule |
+| [terraform/modules/ecs/](06-infrastructure/terraform/modules/ecs/) | Done | ECS Fargate cluster, platform-app + agent-engine services, autoscaling |
+| [terraform/modules/ecr/](06-infrastructure/terraform/modules/ecr/) | Done | ECR repos, KMS encryption, lifecycle policies, IAM repo policies |
+| [terraform/modules/secrets/](06-infrastructure/terraform/modules/secrets/) | Done | Secrets Manager secrets (7 secrets, KMS, placeholder bootstrap) |
+| [terraform/modules/mongodb/](06-infrastructure/terraform/modules/mongodb/) | Done | MongoDB Atlas cluster, PrivateLink, database user, IP allowlist |
+| [terraform/modules/monitoring/](06-infrastructure/terraform/modules/monitoring/) | Done | CloudWatch dashboard, 9 alarms, SNS, log metric filters |
+| [terraform/environments/dev/](06-infrastructure/terraform/environments/dev/) | Done | Dev environment wiring (M10, 1 AZ, MOCK_MODE=true) |
+| [terraform/environments/prod/](06-infrastructure/terraform/environments/prod/) | Done | Prod environment wiring (M30, 2 AZs, HA, deletion protection) |
 
 ### 07 — Security
 | File | Status | Description |

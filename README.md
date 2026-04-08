@@ -28,7 +28,7 @@ Start here. Every deep-dive session produces a file in the relevant folder below
 | [crewai/dev-crew.md](02-agent-engine/crewai/dev-crew.md) | Done | Dev Crew |
 | [crewai/qa-crew.md](02-agent-engine/crewai/qa-crew.md) | Done | QA Crew |
 | [crewai/devops-crew.md](02-agent-engine/crewai/devops-crew.md) | Done | DevOps Crew |
-| [prompts/](02-agent-engine/prompts/) | Pending | Prompt templates per agent |
+| [prompts/](02-agent-engine/crewai/) | N/A | Prompts (role, goal, backstory, task descriptions) documented inline in crewai/*.md — no separate template files needed until a dedicated prompt engineer iterates independently of code |
 
 ### 03 — Platform Core (Java)
 | File | Status | Description |

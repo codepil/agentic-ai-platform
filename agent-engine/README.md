@@ -293,19 +293,105 @@ Controlled by `src/platform/llm/model_router.py`. Override via `SONNET_MODEL` / 
 
 ## How Java platform-app uses this service
 
+### Full round-trip sequence
+
 ```
-ReactJS MFE
-    |  (WebSocket STOMP)
-Java platform-app (port 8080)
-    |  POST /api/v1/runs              -- starts run
-    |  GET  /api/v1/runs/{id}/events  -- subscribes SSE stream
-    |  POST /api/v1/runs/{id}/resume  -- forwards approval decision
-Agent Engine (port 8000)
-    |
-LangGraph StateGraph + CrewAI crews
+User (ReactJS MFE)
+  |
+  | POST /api/v1/runs  (HTTP, Okta JWT)
+  v
+Java platform-app  [AgentRunService]
+  |
+  | 1. Persist AgentRun to MongoDB (status=running)
+  | 2. POST /api/v1/runs  -->  Agent Engine
+  |                              |
+  |                              | 202 Accepted
+  |                              |
+  | 3. GET /api/v1/runs/{id}/events  (SSE, long-lived)
+  |    <-- data: {"agent":"requirements_crew", "event_type":"state_update", ...}
+  |    <-- data: {"event_type":"approval_requested", ...}
+  |    <-- data: {"agent":"architecture_crew", "event_type":"state_update", ...}
+  |    <-- data: {"event_type":"run_complete"}
+  |
+  | 4. Each SSE event is:
+  |      a. Broadcast to ReactJS via WebSocket STOMP (/topic/runs/{id})
+  |      b. Written to MongoDB audit trail (async, non-blocking)
+  |      c. Parsed for special types (approval_requested, run_complete, error)
+  |
+  | 5. On approval_requested:
+  |      - MongoDB ApprovalRequest document created
+  |      - Slack notification sent to #platform-oncall
+  |
+User (ReactJS Approval Portal MFE)
+  |
+  | POST /api/v1/approvals/{id}/decide  (HTTP, Okta JWT, scope: agents:approve)
+  v
+Java platform-app  [ApprovalService]
+  |
+  | POST /api/v1/runs/{id}/resume  -->  Agent Engine
+  |                                       |
+  |                                       | LangGraph Command(resume=...) unblocks graph
+  |                                       |
+  | 6. Re-subscribes to SSE stream  <-----+
+  |    <-- data: {"agent":"architecture_crew", ...}
+  |    ...continues until run_complete
+  v
+ReactJS dashboard updated in real time via WebSocket
 ```
 
-The Java `AgentRunService` calls these endpoints via Spring `WebClient` and forwards SSE events to ReactJS over STOMP WebSocket. The human approval flow is driven by the Java `ApprovalController` → `ApprovalService` → this resume endpoint.
+### Event types emitted by the SSE stream
+
+| `event_type` | When emitted | Java action |
+|---|---|---|
+| `state_update` | After each LangGraph node completes | Broadcast to WebSocket, write audit |
+| `approval_requested` | Graph paused at `interrupt()` gate | Create `ApprovalRequest` in MongoDB, Slack alert |
+| `stage_complete` | End of each SDLC stage | Update `current_stage` in MongoDB |
+| `run_complete` | Graph finished all nodes | Update status to `completed` in MongoDB |
+| `error` | Agent crew or tool call failed | Append to `errors[]` in MongoDB, Slack alert |
+| `heartbeat` | Every 300s of inactivity | No action — keeps connection alive |
+
+### Error handling
+
+**Agent-engine unreachable at run start**
+- Java `AgentRunService` catches the WebClient error
+- Run status set to `failed` in MongoDB
+- Slack oncall alert fired
+- ReactJS receives `failed` status on next poll
+
+**SSE stream disconnects mid-run** (network blip, agent-engine restart)
+- `handleSseError()` fires in `AgentRunService`
+- Run status set to `failed` in MongoDB
+- Error appended to `errors[]` array
+- Slack oncall alert fired
+- No automatic reconnection in the current implementation — oncall must investigate and manually re-trigger the run if appropriate
+
+**Agent-engine returns an `error` event** (crew failure, LLM timeout)
+- Error message appended to `errors[]` in MongoDB
+- Run continues if the LangGraph error handler node handles it; otherwise the graph terminates with `run_complete` carrying the error state
+
+**Approval resume fails** (agent-engine down when approver submits decision)
+- `ApprovalService` catches the WebClient error
+- Approval decision is persisted in MongoDB
+- Slack alert sent — oncall can retry the resume once agent-engine recovers
+
+### Local development
+
+Run both services simultaneously:
+
+```bash
+# Terminal 1 — agent-engine
+cd agent-engine
+MOCK_MODE=true uvicorn src.platform.api.server:app --reload --port 8000
+
+# Terminal 2 — platform-app
+cd platform-core
+OKTA_ISSUER_URI=https://placeholder.okta.example.com/oauth2/default \
+MONGO_URI=mongodb://localhost:27017/agent_platform \
+AGENT_ENGINE_BASE_URL=http://localhost:8000 \
+mvn spring-boot:run -pl platform-app
+```
+
+The Java app connects to the agent-engine at `http://localhost:8000` via `AGENT_ENGINE_BASE_URL`.
 
 ---
 
